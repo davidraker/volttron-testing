@@ -30,24 +30,76 @@ import inspect
 from enum import Enum
 import re
 from logging import Logger
+import os
 import random
+import tempfile
 from typing import Dict, Callable, Any, Tuple, List, Optional, TypeVar
 
+from contextlib import contextmanager
 from gevent.event import AsyncResult
+from pathlib import Path
+
 from volttron.client.decorators import core_builder, connection_builder
 from volttron.types import Credentials, Connection, AgentContext, CoreLoop
 from volttron.types.agent_context import AgentOptions
+from volttron.utils.context import ClientContext as cc
 
 # Need to use full path to ABC class here.
 from volttron.types.factories import CoreBuilder, ConnectionBuilder
 
 from volttrontesting.memory_pubsub import MemoryPubSub, MemorySubscriber, PublishedMessage
-from volttrontesting.platformwrapper import create_volttron_home, with_os_environ
+#from volttrontesting.platformwrapper import create_volttron_home, with_os_environ
 
 from volttron.client import Agent
 
 AgentT = type(Agent)
 
+def create_volttron_home() -> str:
+    """
+    Creates a VOLTTRON_HOME temp directory for use within a volttrontesting context.
+    This function will return a string containing the VOLTTRON_HOME but will not
+    set the global variable.
+
+    :return: str: the temp directory
+    """
+    volttron_home = tempfile.mkdtemp()
+    # This is needed to run tests with volttron's secure mode. Without this
+    # default permissions for folders under /tmp directory doesn't not have read or execute for group or others
+    os.chmod(volttron_home, 0o755)
+    # Move volttron_home to be one level below the mkdir so that
+    # the volttron.log file is not part of the same folder for
+    # observer.
+    volttron_home = os.path.join(volttron_home, "volttron_home")
+    os.makedirs(volttron_home)
+    return volttron_home
+
+
+@contextmanager
+def with_os_environ(update_env: dict):
+    """
+    Wrapper function for updating os environment and returning it to the previous state.  This function
+    should be used whenever a modification to os.environ is necessary.  The restoration of the environment
+    after the call will happen automatically
+
+    Exaample::
+
+        with with_os_environ(self.env):
+            print('within self.env context now')
+
+    :param update_env:
+    :return:
+    """
+    copy_env = os.environ.copy()
+    os.environ.update(update_env)
+    vhome = (Path(os.environ.get("VOLTTRON_HOME", "~/.volttron")).expanduser().resolve())
+    copy_cc_vhome = cc.__volttron_home__
+    cc.__volttron_home__ = vhome
+
+    try:
+        yield
+    finally:
+        os.environ = copy_env
+        cc.__volttron_home__ = copy_cc_vhome
 
 @dataclass
 class ServerConfig:
